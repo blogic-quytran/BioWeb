@@ -249,24 +249,53 @@ const renderProducts = (items) => {
 const renderAdminList = (items) => {
 	if (!adminList) return;
 	adminList.innerHTML = '';
-	adminList.className = 'admin-list admin-grid admin-grid--product';
-	adminList.appendChild(
-		buildAdminRow(['ID', 'Tên', 'Danh mục', 'Ảnh', 'Link', 'Thao tác'], true),
-	);
+	adminList.className = 'admin-list admin-grid admin-grid--product-cards';
 	items.forEach((item) => {
+		const card = document.createElement('article');
+		card.className = 'admin-card';
+
+		const media = document.createElement('div');
+		media.className = 'admin-card-media';
+		if (item.image_url) {
+			media.style.backgroundImage = `url(${item.image_url})`;
+		}
+
+		const body = document.createElement('div');
+		body.className = 'admin-card-body';
+
+		const title = document.createElement('div');
+		title.className = 'admin-card-title';
+		title.textContent = item.name;
+
+		const meta = document.createElement('div');
+		meta.className = 'admin-card-meta';
+		const categoryChip = document.createElement('span');
+		categoryChip.className = 'admin-chip';
+		categoryChip.textContent = item.category || 'Chưa phân loại';
+		const idTag = document.createElement('span');
+		idTag.className = 'admin-id';
+		idTag.textContent = `#${item.id}`;
+		meta.appendChild(categoryChip);
+		meta.appendChild(idTag);
+
+		const links = document.createElement('div');
+		links.className = 'admin-card-links';
 		const imageLink = document.createElement('a');
 		imageLink.className = 'admin-link';
 		imageLink.href = item.image_url || '#';
 		imageLink.target = '_blank';
 		imageLink.rel = 'noopener';
-		imageLink.textContent = item.image_url ? 'Xem ảnh' : '-';
+		imageLink.textContent = item.image_url ? 'Ảnh (Supabase)' : 'Chưa có ảnh';
 
 		const productLink = document.createElement('a');
 		productLink.className = 'admin-link';
 		productLink.href = item.link || '#';
 		productLink.target = '_blank';
 		productLink.rel = 'noopener';
-		productLink.textContent = item.link ? 'Mở link' : '-';
+		productLink.textContent = item.link ? 'Link sản phẩm' : 'Chưa có link';
+
+		links.appendChild(imageLink);
+		links.appendChild(productLink);
 
 		const edit = document.createElement('button');
 		edit.type = 'button';
@@ -300,19 +329,14 @@ const renderAdminList = (items) => {
 		actions.appendChild(edit);
 		actions.appendChild(del);
 
-		adminList.appendChild(
-			buildAdminRow(
-				[
-					String(item.id),
-					item.name,
-					item.category,
-					imageLink,
-					productLink,
-					actions,
-				],
-				false,
-			),
-		);
+		body.appendChild(title);
+		body.appendChild(meta);
+		body.appendChild(links);
+		body.appendChild(actions);
+
+		card.appendChild(media);
+		card.appendChild(body);
+		adminList.appendChild(card);
 	});
 };
 
