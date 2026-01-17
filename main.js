@@ -24,6 +24,7 @@ const featuredProductSearch = document.querySelector('#featuredProductSearch');
 const featuredProductOptions = document.querySelector('#featuredProductOptions');
 const featuredProductId = document.querySelector('#featuredProductId');
 const featuredAdminList = document.querySelector('#featuredAdminList');
+const featuredSubmit = document.querySelector('#featuredSubmit');
 const adminSections = document.querySelectorAll('.admin-section');
 const adminLoginOverlay = document.querySelector('#loginOverlay');
 const adminLoginForm = document.querySelector('#adminLoginForm');
@@ -54,6 +55,64 @@ let featuredItems = [];
 let featuredIndex = 0;
 let featuredTimer = null;
 let editingProductImageUrl = '';
+let editingFeaturedId = null;
+let currentProfile = null;
+let filteredProducts = [];
+let visibleProductCount = 6;
+const PRODUCT_PAGE_SIZE = 6;
+
+const supabaseConfig = window.SUPABASE_CONFIG || {};
+let supabaseClient = null;
+
+const getSupabaseClient = () => {
+	if (!window.supabase || !supabaseConfig.url || !supabaseConfig.anonKey) return null;
+	if (!supabaseClient) {
+		supabaseClient = window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey);
+	}
+	return supabaseClient;
+};
+
+const uploadToSupabase = async (file, folder = 'uploads') => {
+	const client = getSupabaseClient();
+	if (!client) return null;
+	const bucket = supabaseConfig.bucket || 'uploads';
+	const ext = file.name.includes('.') ? file.name.split('.').pop() : '';
+	const safeName = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext ? `.${ext}` : ''}`;
+	const path = `${folder}/${safeName}`;
+	const { error } = await client.storage.from(bucket).upload(path, file, {
+		upsert: true,
+		contentType: file.type || 'application/octet-stream',
+	});
+	if (error) throw error;
+	const { data } = client.storage.from(bucket).getPublicUrl(path);
+	return data.publicUrl;
+};
+
+const buildAdminRow = (cells, isHeader = false) => {
+	const row = document.createElement('div');
+	row.className = `admin-row${isHeader ? ' admin-row--header' : ''}`;
+	if (isHeader) {
+		cells.forEach((label) => {
+			const cell = document.createElement('div');
+			cell.className = 'admin-cell';
+			cell.textContent = label;
+			row.appendChild(cell);
+		});
+		return row;
+	}
+
+	cells.forEach((cell) => {
+		const wrapper = document.createElement('div');
+		wrapper.className = 'admin-cell';
+		if (cell instanceof HTMLElement) {
+			wrapper.appendChild(cell);
+		} else {
+			wrapper.textContent = cell ?? '';
+		}
+		row.appendChild(wrapper);
+	});
+	return row;
+};
 
 const setActive = (items, target) => {
 	items.forEach((item) => item.classList.remove('active'));
@@ -190,12 +249,24 @@ const renderProducts = (items) => {
 const renderAdminList = (items) => {
 	if (!adminList) return;
 	adminList.innerHTML = '';
+	adminList.className = 'admin-list admin-grid admin-grid--product';
+	adminList.appendChild(
+		buildAdminRow(['ID', 'Tên', 'Danh mục', 'Ảnh', 'Link', 'Thao tác'], true),
+	);
 	items.forEach((item) => {
-		const row = document.createElement('div');
-		row.className = 'admin-item';
+		const imageLink = document.createElement('a');
+		imageLink.className = 'admin-link';
+		imageLink.href = item.image_url || '#';
+		imageLink.target = '_blank';
+		imageLink.rel = 'noopener';
+		imageLink.textContent = item.image_url ? 'Xem ảnh' : '-';
 
-		const label = document.createElement('div');
-		label.textContent = `${item.name} • ${item.category}`;
+		const productLink = document.createElement('a');
+		productLink.className = 'admin-link';
+		productLink.href = item.link || '#';
+		productLink.target = '_blank';
+		productLink.rel = 'noopener';
+		productLink.textContent = item.link ? 'Mở link' : '-';
 
 		const edit = document.createElement('button');
 		edit.type = 'button';
@@ -224,22 +295,64 @@ const renderAdminList = (items) => {
 			await loadProducts();
 		});
 
-		row.appendChild(label);
-		row.appendChild(edit);
-		row.appendChild(del);
-		adminList.appendChild(row);
+		const actions = document.createElement('div');
+		actions.className = 'admin-actions';
+		actions.appendChild(edit);
+		actions.appendChild(del);
+
+		adminList.appendChild(
+			buildAdminRow(
+				[
+					String(item.id),
+					item.name,
+					item.category,
+					imageLink,
+					productLink,
+					actions,
+				],
+				false,
+			),
+		);
 	});
 };
 
 const renderFeaturedAdminList = (items) => {
 	if (!featuredAdminList) return;
 	featuredAdminList.innerHTML = '';
+	featuredAdminList.className = 'admin-list admin-grid admin-grid--featured';
+	featuredAdminList.appendChild(
+		buildAdminRow(['ID', 'Tên', 'Product ID', 'Ảnh', 'Link', 'Thao tác'], true),
+	);
 	items.forEach((item) => {
-		const row = document.createElement('div');
-		row.className = 'admin-item';
+		const imageUrl = item.product_image || item.image_url || '';
+		const linkUrl = item.product_link || '';
+		const imageLink = document.createElement('a');
+		imageLink.className = 'admin-link';
+		imageLink.href = imageUrl || '#';
+		imageLink.target = '_blank';
+		imageLink.rel = 'noopener';
+		imageLink.textContent = imageUrl ? 'Xem ảnh' : '-';
 
-		const label = document.createElement('div');
-		label.textContent = item.product_name || item.name;
+		const productLink = document.createElement('a');
+		productLink.className = 'admin-link';
+		productLink.href = linkUrl || '#';
+		productLink.target = '_blank';
+		productLink.rel = 'noopener';
+		productLink.textContent = linkUrl ? 'Mở link' : '-';
+
+		const edit = document.createElement('button');
+		edit.type = 'button';
+		edit.className = 'admin-edit';
+		edit.textContent = 'Sửa';
+		edit.addEventListener('click', () => {
+			if (!featuredProductSearch || !featuredProductId) return;
+			featuredProductSearch.value = item.product_name || item.name || '';
+			featuredProductId.value = item.product_id || '';
+			editingFeaturedId = item.id;
+			if (featuredSubmit) {
+				featuredSubmit.textContent = 'Cập nhật nổi bật';
+			}
+		});
 
 		const del = document.createElement('button');
 		del.type = 'button';
@@ -250,9 +363,24 @@ const renderFeaturedAdminList = (items) => {
 			await loadFeatured();
 		});
 
-		row.appendChild(label);
-		row.appendChild(del);
-		featuredAdminList.appendChild(row);
+		const actions = document.createElement('div');
+		actions.className = 'admin-actions';
+		actions.appendChild(edit);
+		actions.appendChild(del);
+
+		featuredAdminList.appendChild(
+			buildAdminRow(
+				[
+					String(item.id),
+					item.product_name || item.name || '',
+					item.product_id ? String(item.product_id) : '-',
+					imageLink,
+					productLink,
+					actions,
+				],
+				false,
+			),
+		);
 	});
 };
 
@@ -261,13 +389,13 @@ const filterProducts = () => {
 	const chipValue = activeChip ? activeChip.dataset.category : 'Tất cả';
 	const keyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
 
-	const filtered = allProducts.filter((product) => {
+	filteredProducts = allProducts.filter((product) => {
 		const matchCategory = chipValue === 'Tất cả' || product.category === chipValue;
 		const matchName = product.name.toLowerCase().includes(keyword);
 		return matchCategory && matchName;
 	});
-
-	renderProducts(filtered);
+	visibleProductCount = PRODUCT_PAGE_SIZE;
+	renderProducts(filteredProducts.slice(0, visibleProductCount));
 };
 
 tabs.forEach((tab) => {
@@ -277,6 +405,20 @@ tabs.forEach((tab) => {
 if (searchInput) {
 	searchInput.addEventListener('input', filterProducts);
 }
+
+const loadMoreProducts = () => {
+	if (!filteredProducts.length) return;
+	if (visibleProductCount >= filteredProducts.length) return;
+	visibleProductCount = Math.min(visibleProductCount + PRODUCT_PAGE_SIZE, filteredProducts.length);
+	renderProducts(filteredProducts.slice(0, visibleProductCount));
+};
+
+const handleProductScroll = () => {
+	const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 200;
+	if (nearBottom) {
+		loadMoreProducts();
+	}
+};
 
 if (productForm) {
 	productForm.addEventListener('submit', async (event) => {
@@ -291,29 +433,40 @@ if (productForm) {
 		return;
 	}
 
-	const formData = new FormData();
-	formData.append('name', name);
-	formData.append('category', category);
-	formData.append('link', link);
-	if (file) {
-		formData.append('image', file);
+	let res = null;
+	try {
+		if (file && getSupabaseClient()) {
+			const imageUrl = await uploadToSupabase(file, 'products');
+			const payload = { name, category, link, image_url: imageUrl };
+			res = await fetch(productId ? `/api/products/${productId}` : '/api/products', {
+				method: productId ? 'PUT' : 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload),
+			});
+			editingProductImageUrl = imageUrl;
+		} else {
+			const formData = new FormData();
+			formData.append('name', name);
+			formData.append('category', category);
+			formData.append('link', link);
+			if (file) {
+				formData.append('image', file);
+			} else if (productId && editingProductImageUrl) {
+				formData.append('image_url', editingProductImageUrl);
+			}
+
+			res = await fetch(productId ? `/api/products/${productId}` : '/api/products', {
+				method: productId ? 'PUT' : 'POST',
+				body: formData,
+			});
+		}
+	} catch (error) {
+		showToast('Lỗi upload ảnh');
+		return;
 	}
 
-	if (productId) {
-		if (!file && editingProductImageUrl) {
-			formData.append('image_url', editingProductImageUrl);
-		}
-		await fetch(`/api/products/${productId}`, {
-			method: 'PUT',
-			body: formData,
-		});
-		showToast('Lưu sản phẩm thành công');
-	} else {
-		await fetch('/api/products', {
-			method: 'POST',
-			body: formData,
-		});
-		showToast('Thêm sản phẩm thành công');
+	if (res && res.ok) {
+		showToast(productId ? 'Lưu sản phẩm thành công' : 'Thêm sản phẩm thành công');
 	}
 
 	productForm.reset();
@@ -336,6 +489,10 @@ if (featuredForm) {
 	const formData = new FormData();
 	formData.append('product_id', productId);
 
+	if (editingFeaturedId) {
+		await fetch(`/api/featured/${editingFeaturedId}`, { method: 'DELETE' });
+	}
+
 	await fetch('/api/featured', {
 		method: 'POST',
 		body: formData,
@@ -343,6 +500,8 @@ if (featuredForm) {
 
 	featuredForm.reset();
 	featuredProductId.value = '';
+	editingFeaturedId = null;
+	if (featuredSubmit) featuredSubmit.textContent = 'Thêm nổi bật';
 	showToast('Lưu sản phẩm nổi bật thành công');
 	await loadFeatured();
   });
@@ -399,6 +558,8 @@ if (contactForm) {
 const loadProducts = async () => {
 	const productsRes = await fetch('/api/products');
 	allProducts = await productsRes.json();
+	filteredProducts = allProducts;
+	visibleProductCount = PRODUCT_PAGE_SIZE;
 	renderFeaturedProductOptions(allProducts);
 	filterProducts();
 	renderAdminList(allProducts);
@@ -470,14 +631,15 @@ const renderCategoryOptions = (items) => {
 const renderCategoryList = (items) => {
 	if (!categoryList) return;
 	categoryList.innerHTML = '';
+	categoryList.className = 'admin-list admin-grid admin-grid--category';
+	categoryList.appendChild(
+		buildAdminRow(['ID', 'Tên', 'Ảnh', 'Thao tác'], true),
+	);
 	items
 		.filter((item) => item.name !== 'Tất cả')
 		.forEach((item) => {
-			const row = document.createElement('div');
-			row.className = 'admin-item';
-
-			const label = document.createElement('div');
-			label.textContent = item.name;
+			const imagePlaceholder = document.createElement('span');
+			imagePlaceholder.textContent = '-';
 
 			const edit = document.createElement('button');
 			edit.type = 'button';
@@ -499,10 +661,14 @@ const renderCategoryList = (items) => {
 				await loadCategories();
 			});
 
-			row.appendChild(label);
-			row.appendChild(edit);
-			row.appendChild(del);
-			categoryList.appendChild(row);
+			const actions = document.createElement('div');
+			actions.className = 'admin-actions';
+			actions.appendChild(edit);
+			actions.appendChild(del);
+
+			categoryList.appendChild(
+				buildAdminRow([String(item.id), item.name, imagePlaceholder, actions], false),
+			);
 		});
 };
 
@@ -541,6 +707,7 @@ const loadContacts = async () => {
 const loadData = async () => {
 	const profileRes = await fetch('/api/profile');
 	const profile = await profileRes.json();
+	currentProfile = profile;
 
 		if (profileNameText && profile.name) {
 			profileNameText.textContent = profile.name;
@@ -586,6 +753,8 @@ const loadData = async () => {
 
 loadData();
 
+window.addEventListener('scroll', handleProductScroll);
+
 if (adminLoginOverlay) {
 	setAdminVisible(false);
 	adminLoginForm.addEventListener('submit', async (event) => {
@@ -622,20 +791,46 @@ if (adminLoginOverlay) {
 if (profileAdminForm) {
 	profileAdminForm.addEventListener('submit', async (event) => {
 		event.preventDefault();
-		const formData = new FormData();
-		formData.append('name', profileAdminName.value.trim());
-		formData.append('description', profileAdminDesc.value.trim());
+		const name = profileAdminName.value.trim();
+		const description = profileAdminDesc.value.trim();
 		const file = profileAdminAvatar.files[0];
-		if (file) {
-			formData.append('avatar', file);
+		let res = null;
+
+		try {
+			if (file && getSupabaseClient()) {
+				const avatarUrl = await uploadToSupabase(file, 'avatars');
+				res = await fetch('/api/profile', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						name,
+						description,
+						avatar_url: avatarUrl,
+					}),
+				});
+			} else if (file) {
+				const formData = new FormData();
+				formData.append('name', name);
+				formData.append('description', description);
+				formData.append('avatar', file);
+				res = await fetch('/api/profile', {
+					method: 'POST',
+					body: formData,
+				});
+			} else {
+				const avatarUrl = currentProfile?.avatar_url || '';
+				res = await fetch('/api/profile', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ name, description, avatar_url: avatarUrl }),
+				});
+			}
+		} catch (error) {
+			showToast('Lỗi upload ảnh');
+			return;
 		}
 
-		const res = await fetch('/api/profile', {
-			method: 'POST',
-			body: formData,
-		});
-
-		if (res.ok) {
+		if (res && res.ok) {
 			showToast('Lưu thông tin thành công');
 			await loadData();
 		}
@@ -680,3 +875,89 @@ if (featuredList) {
 }
 
 window.addEventListener('resize', updateFeaturedPosition);
+
+const productListEl = document.getElementById('productList');
+const productLoadingEl = document.getElementById('productLoading');
+const productSentinelEl = document.getElementById('productSentinel');
+const BATCH_SIZE = 6;
+let visibleCount = 0;
+let pendingGetCount = 0;
+
+const showLoading = () => {
+  if (!productLoadingEl) return;
+  productLoadingEl.hidden = false;
+  productLoadingEl.setAttribute('aria-busy', 'true');
+};
+
+const hideLoading = () => {
+  if (!productLoadingEl) return;
+  productLoadingEl.hidden = true;
+  productLoadingEl.removeAttribute('aria-busy');
+};
+
+const originalFetch = window.fetch.bind(window);
+window.fetch = async (input, init = {}) => {
+  const method =
+    (init && init.method) ||
+    (input && input.method) ||
+    'GET';
+  const isGet = String(method).toUpperCase() === 'GET';
+  if (isGet) {
+    pendingGetCount += 1;
+    showLoading();
+  }
+  try {
+    return await originalFetch(input, init);
+  } finally {
+    if (isGet) {
+      pendingGetCount = Math.max(0, pendingGetCount - 1);
+      if (pendingGetCount === 0) hideLoading();
+    }
+  }
+};
+
+const applyLazyBatch = () => {
+  if (!productListEl) return;
+  const items = Array.from(productListEl.children);
+  visibleCount = Math.min(BATCH_SIZE, items.length);
+  items.forEach((item, index) => {
+    item.style.display = index < visibleCount ? '' : 'none';
+  });
+};
+
+const loadNextBatch = () => {
+  if (!productListEl) return;
+  const items = Array.from(productListEl.children);
+  const nextCount = Math.min(visibleCount + BATCH_SIZE, items.length);
+  for (let i = visibleCount; i < nextCount; i += 1) {
+    items[i].style.display = '';
+  }
+  visibleCount = nextCount;
+};
+
+const observeLazyLoad = () => {
+  if (!productListEl || !productSentinelEl) return;
+  const io = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        loadNextBatch();
+      }
+    },
+    { rootMargin: '200px 0px' }
+  );
+  io.observe(productSentinelEl);
+};
+
+const observeListChanges = () => {
+  if (!productListEl) return;
+  const mo = new MutationObserver(() => {
+    applyLazyBatch();
+  });
+  mo.observe(productListEl, { childList: true });
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  applyLazyBatch();
+  observeLazyLoad();
+  observeListChanges();
+});

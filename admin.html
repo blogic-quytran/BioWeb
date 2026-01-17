@@ -6,6 +6,7 @@
   <title>Admin</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <meta name="robots" content="noindex,nofollow" />
 </head>
 <body>
   <main class="container">
@@ -52,7 +53,7 @@
         <input id="featuredProductSearch" type="text" list="featuredProductOptions" placeholder="Tìm sản phẩm" required />
         <datalist id="featuredProductOptions"></datalist>
         <input id="featuredProductId" type="hidden" />
-        <button type="submit" class="admin-submit">Thêm nổi bật</button>
+        <button id="featuredSubmit" type="submit" class="admin-submit">Thêm nổi bật</button>
       </form>
       <div id="featuredAdminList" class="admin-list"></div>
     </section>
@@ -78,32 +79,9 @@
         <a href="/api/contacts" target="_blank" rel="noopener">/api/contacts</a>
       </div>
     </section>
-
-    <section class="admin admin-section" aria-label="Deploy Vercel">
-      <div class="admin-title">Deploy Vercel (Flask API)</div>
-      <div class="admin-list">
-        <div>1) Push project lên GitHub.</div>
-        <div>2) Vercel → New Project → Import repo.</div>
-        <div>3) Root Directory: d:\WEB (hoặc repo root).</div>
-        <div>4) Thêm file cần thiết: <strong>vercel.json</strong> + <strong>api/index.py</strong> để chạy Flask.</div>
-        <div>5) Deploy.</div>
-      </div>
-    </section>
-
-    <section class="admin admin-section" aria-label="Push GitHub">
-      <div class="admin-title">Push GitHub</div>
-      <div class="admin-list">
-        <div>git init</div>
-        <div>git add .</div>
-        <div>git commit -m "init"</div>
-        <div>git branch -M main</div>
-        <div>git remote add origin https://github.com/&lt;user&gt;/&lt;repo&gt;.git</div>
-        <div>git push -u origin main</div>
-      </div>
-    </section>
   </main>
 
-  <div class="toast" id="toast">Lưu thành công</div>
+  <div class="toast" id="toast" role="status" aria-live="polite">Lưu thành công</div>
 
   <div class="overlay" id="loginOverlay" aria-label="Login">
     <div class="modal">
@@ -117,6 +95,14 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js"></script>
+  <script>
+    window.SUPABASE_CONFIG = {
+      url: 'https://iivskqxpqmvxhxysrabo.supabase.co',
+      anonKey: 'sb_publishable_rnMySJcCjadZYSxe0FGiZA_WpP1DmHR',
+      bucket: 'uploads',
+    };
+  </script>
   <script src="main.js"></script>
 </body>
 </html>

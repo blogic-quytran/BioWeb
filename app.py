@@ -1,24 +1,49 @@
 from __future__ import annotations
 
-import sqlite3
+import os
+from uuid import uuid4
 from pathlib import Path
 from typing import Any
 
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from supabase import create_client
+from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, request, send_from_directory
 from werkzeug.utils import secure_filename
 
+load_dotenv()
+
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "data.db"
 UPLOAD_DIR = BASE_DIR / "uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+
+DATABASE_URL = (
+    os.getenv("DATABASE_URL")
+    or os.getenv("SUPABASE_DATABASE_URL")
+    or os.getenv("POSTGRES_URL")
+)
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "uploads")
+
+supabase = (
+    create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+    else None
+)
+
+_db_ready = False
 
 app = Flask(__name__, static_folder=".", static_url_path="")
 
 
-def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_db() -> psycopg2.extensions.connection:
+    if not DATABASE_URL:
+        raise RuntimeError("Missing DATABASE_URL environment variable")
+    return psycopg2.connect(DATABASE_URL, sslmode="require", cursor_factory=RealDictCursor)
 
 
 def init_db() -> None:
@@ -29,7 +54,7 @@ def init_db() -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS profile (
-            id INTEGER PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             avatar_url TEXT,
             badges_count INTEGER NOT NULL DEFAULT 4,
@@ -40,20 +65,8 @@ def init_db() -> None:
 
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS featured (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            image_url TEXT,
-            product_id INTEGER,
-            FOREIGN KEY (product_id) REFERENCES products (id)
-        )
-        """
-    )
-
-    cur.execute(
-        """
         CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
             image_url TEXT,
@@ -64,8 +77,19 @@ def init_db() -> None:
 
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS featured (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            image_url TEXT,
+            product_id INTEGER REFERENCES products (id)
+        )
+        """
+    )
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE
         )
         """
@@ -74,7 +98,7 @@ def init_db() -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS admin_users (
-            id INTEGER PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
             password TEXT NOT NULL
         )
@@ -84,7 +108,7 @@ def init_db() -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS contacts (
-            id INTEGER PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             facebook TEXT,
             instagram TEXT,
             tiktok TEXT,
@@ -93,44 +117,29 @@ def init_db() -> None:
         """
     )
 
-    cur.execute("SELECT COUNT(*) FROM profile")
-    if cur.fetchone()[0] == 0:
+    cur.execute("ALTER TABLE profile ADD COLUMN IF NOT EXISTS description TEXT")
+    cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS link TEXT")
+    cur.execute("ALTER TABLE featured ADD COLUMN IF NOT EXISTS product_id INTEGER")
+
+    cur.execute("SELECT COUNT(*) AS count FROM profile")
+    if cur.fetchone()["count"] == 0:
         cur.execute(
-            "INSERT INTO profile (name, avatar_url, badges_count, description) VALUES (?, ?, ?, ?)",
+            "INSERT INTO profile (name, avatar_url, badges_count, description) VALUES (%s, %s, %s, %s)",
             ("Đin 1m60", "", 4, "Mô tả cửa hàng"),
         )
 
-    cur.execute("PRAGMA table_info(profile)")
-    profile_columns = {row[1] for row in cur.fetchall()}
-    if "description" not in profile_columns:
-        cur.execute("ALTER TABLE profile ADD COLUMN description TEXT")
-        cur.execute("UPDATE profile SET description = ? WHERE description IS NULL", ("Mô tả cửa hàng",))
-
-    cur.execute("SELECT COUNT(*) FROM featured")
-    if cur.fetchone()[0] == 0:
+    cur.execute("SELECT COUNT(*) AS count FROM featured")
+    if cur.fetchone()["count"] == 0:
         featured_items = [
             ("Áo dài Zarcen", ""),
             ("Áo dài Zarcen", ""),
             ("Áo dài Zarcen", ""),
             ("D276", ""),
         ]
-        cur.executemany("INSERT INTO featured (name, image_url) VALUES (?, ?)", featured_items)
+        cur.executemany("INSERT INTO featured (name, image_url) VALUES (%s, %s)", featured_items)
 
-    cur.execute("PRAGMA table_info(featured)")
-    columns = {row[1] for row in cur.fetchall()}
-    if "product_id" not in columns:
-        cur.execute("ALTER TABLE featured ADD COLUMN product_id INTEGER")
-        cur.execute(
-            """
-            UPDATE featured
-            SET product_id = (
-                SELECT id FROM products WHERE products.name = featured.name LIMIT 1
-            )
-            """
-        )
-
-    cur.execute("SELECT COUNT(*) FROM products")
-    if cur.fetchone()[0] == 0:
+    cur.execute("SELECT COUNT(*) AS count FROM products")
+    if cur.fetchone()["count"] == 0:
         products = [
             ("AD Annoo", "Áo dài", "", ""),
             ("Túi Fidé", "Túi", "", ""),
@@ -145,17 +154,12 @@ def init_db() -> None:
             ("Quần jean pastel", "Quần jean", "", ""),
         ]
         cur.executemany(
-            "INSERT INTO products (name, category, image_url, link) VALUES (?, ?, ?, ?)",
+            "INSERT INTO products (name, category, image_url, link) VALUES (%s, %s, %s, %s)",
             products,
         )
 
-    cur.execute("PRAGMA table_info(products)")
-    product_columns = {row[1] for row in cur.fetchall()}
-    if "link" not in product_columns:
-        cur.execute("ALTER TABLE products ADD COLUMN link TEXT")
-
-    cur.execute("SELECT COUNT(*) FROM categories")
-    if cur.fetchone()[0] == 0:
+    cur.execute("SELECT COUNT(*) AS count FROM categories")
+    if cur.fetchone()["count"] == 0:
         categories = [
             ("Tất cả",),
             ("Quần",),
@@ -168,19 +172,19 @@ def init_db() -> None:
             ("Quần jean",),
             ("Túi",),
         ]
-        cur.executemany("INSERT INTO categories (name) VALUES (?)", categories)
+        cur.executemany("INSERT INTO categories (name) VALUES (%s)", categories)
 
-    cur.execute("SELECT COUNT(*) FROM admin_users")
-    if cur.fetchone()[0] == 0:
+    cur.execute("SELECT COUNT(*) AS count FROM admin_users")
+    if cur.fetchone()["count"] == 0:
         cur.execute(
-            "INSERT INTO admin_users (username, password) VALUES (?, ?)",
+            "INSERT INTO admin_users (username, password) VALUES (%s, %s)",
             ("hailua", "admin1302"),
         )
 
-    cur.execute("SELECT COUNT(*) FROM contacts")
-    if cur.fetchone()[0] == 0:
+    cur.execute("SELECT COUNT(*) AS count FROM contacts")
+    if cur.fetchone()["count"] == 0:
         cur.execute(
-            "INSERT INTO contacts (facebook, instagram, tiktok, shopee) VALUES (?, ?, ?, ?)",
+            "INSERT INTO contacts (facebook, instagram, tiktok, shopee) VALUES (%s, %s, %s, %s)",
             ("", "", "", ""),
         )
 
@@ -188,8 +192,35 @@ def init_db() -> None:
     conn.close()
 
 
-def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+def rows_to_dicts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
+
+
+def ensure_db_ready() -> None:
+    global _db_ready
+    if _db_ready:
+        return
+    init_db()
+    _db_ready = True
+
+
+def upload_to_storage(file) -> str:
+    if not supabase:
+        raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
+    filename = secure_filename(file.filename)
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext and ext not in ALLOWED_EXTENSIONS:
+        raise ValueError("invalid file type")
+
+    unique_name = f"{uuid4().hex}_{filename}"
+    data = file.stream.read()
+    content_type = file.mimetype or "application/octet-stream"
+    supabase.storage.from_(SUPABASE_STORAGE_BUCKET).upload(
+        unique_name,
+        data,
+        file_options={"content-type": content_type},
+    )
+    return supabase.storage.from_(SUPABASE_STORAGE_BUCKET).get_public_url(unique_name)
 
 
 @app.route("/")
@@ -209,14 +240,18 @@ def privacy() -> Any:
 
 @app.route("/api/profile")
 def profile() -> Any:
+    ensure_db_ready()
     conn = get_db()
-    row = conn.execute("SELECT * FROM profile LIMIT 1").fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM profile LIMIT 1")
+    row = cur.fetchone()
     conn.close()
     return jsonify(dict(row) if row else {})
 
 
 @app.route("/api/profile", methods=["POST"])
 def update_profile() -> Any:
+    ensure_db_ready()
     payload = request.get_json(silent=True) or {}
     form = request.form or {}
     name = str(form.get("name") or payload.get("name", "")).strip()
@@ -225,17 +260,12 @@ def update_profile() -> Any:
 
     file = request.files.get("avatar")
     if file and file.filename:
-        filename = secure_filename(file.filename)
-        ext = filename.rsplit(".", 1)[-1].lower()
-        if ext in ALLOWED_EXTENSIONS:
-            target = UPLOAD_DIR / filename
-            counter = 1
-            while target.exists():
-                stem = Path(filename).stem
-                target = UPLOAD_DIR / f"{stem}-{counter}.{ext}"
-                counter += 1
-            file.save(target)
-            avatar_url = f"/uploads/{target.name}"
+        try:
+            avatar_url = upload_to_storage(file)
+        except ValueError:
+            return jsonify({"error": "invalid file type"}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
 
     if not name:
         return jsonify({"error": "name is required"}), 400
@@ -243,7 +273,7 @@ def update_profile() -> Any:
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE profile SET name = ?, avatar_url = ?, description = ? WHERE id = 1",
+        "UPDATE profile SET name = %s, avatar_url = %s, description = %s WHERE id = 1",
         (name, avatar_url, description),
     )
     conn.commit()
@@ -253,8 +283,10 @@ def update_profile() -> Any:
 
 @app.route("/api/featured")
 def featured() -> Any:
+    ensure_db_ready()
     conn = get_db()
-    rows = conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         """
         SELECT featured.id,
                featured.name,
@@ -267,13 +299,15 @@ def featured() -> Any:
         LEFT JOIN products ON products.id = featured.product_id
         ORDER BY featured.id ASC
         """
-    ).fetchall()
+    )
+    rows = cur.fetchall()
     conn.close()
     return jsonify(rows_to_dicts(rows))
 
 
 @app.route("/api/featured", methods=["POST"])
 def create_featured() -> Any:
+    ensure_db_ready()
     payload = request.get_json(silent=True) or {}
     form = request.form or {}
 
@@ -284,24 +318,21 @@ def create_featured() -> Any:
 
     file = request.files.get("image")
     if file and file.filename:
-        filename = secure_filename(file.filename)
-        ext = filename.rsplit(".", 1)[-1].lower()
-        if ext in ALLOWED_EXTENSIONS:
-            target = UPLOAD_DIR / filename
-            counter = 1
-            while target.exists():
-                stem = Path(filename).stem
-                target = UPLOAD_DIR / f"{stem}-{counter}.{ext}"
-                counter += 1
-            file.save(target)
-            image_url = f"/uploads/{target.name}"
+        try:
+            image_url = upload_to_storage(file)
+        except ValueError:
+            return jsonify({"error": "invalid file type"}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
 
     if not name and not product_id:
         return jsonify({"error": "name or product_id is required"}), 400
 
     if product_id and not name:
         conn = get_db()
-        row = conn.execute("SELECT name FROM products WHERE id = ?", (product_id,)).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM products WHERE id = %s", (product_id,))
+        row = cur.fetchone()
         conn.close()
         if row:
             name = row["name"]
@@ -311,20 +342,21 @@ def create_featured() -> Any:
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO featured (name, image_url, product_id) VALUES (?, ?, ?)",
+        "INSERT INTO featured (name, image_url, product_id) VALUES (%s, %s, %s) RETURNING id",
         (name, image_url, product_id),
     )
+    new_id = cur.fetchone()["id"]
     conn.commit()
-    new_id = cur.lastrowid
     conn.close()
     return jsonify({"id": new_id, "name": name, "image_url": image_url, "product_id": product_id}), 201
 
 
 @app.route("/api/featured/<int:featured_id>", methods=["DELETE"])
 def delete_featured(featured_id: int) -> Any:
+    ensure_db_ready()
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("DELETE FROM featured WHERE id = ?", (featured_id,))
+    cur.execute("DELETE FROM featured WHERE id = %s", (featured_id,))
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
@@ -332,14 +364,18 @@ def delete_featured(featured_id: int) -> Any:
 
 @app.route("/api/categories")
 def categories() -> Any:
+    ensure_db_ready()
     conn = get_db()
-    rows = conn.execute("SELECT * FROM categories ORDER BY id ASC").fetchall()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM categories ORDER BY id ASC")
+    rows = cur.fetchall()
     conn.close()
     return jsonify(rows_to_dicts(rows))
 
 
 @app.route("/api/categories", methods=["POST"])
 def create_category() -> Any:
+    ensure_db_ready()
     payload = request.get_json(silent=True) or {}
     name = str(payload.get("name", "")).strip()
     if not name:
@@ -347,15 +383,16 @@ def create_category() -> Any:
 
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+    cur.execute("INSERT INTO categories (name) VALUES (%s) RETURNING id", (name,))
+    new_id = cur.fetchone()["id"]
     conn.commit()
-    new_id = cur.lastrowid
     conn.close()
     return jsonify({"id": new_id, "name": name}), 201
 
 
 @app.route("/api/categories/<int:category_id>", methods=["PUT"])
 def update_category(category_id: int) -> Any:
+    ensure_db_ready()
     payload = request.get_json(silent=True) or {}
     name = str(payload.get("name", "")).strip()
     if not name:
@@ -363,10 +400,11 @@ def update_category(category_id: int) -> Any:
 
     conn = get_db()
     cur = conn.cursor()
-    old_row = cur.execute("SELECT name FROM categories WHERE id = ?", (category_id,)).fetchone()
-    cur.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
+    cur.execute("SELECT name FROM categories WHERE id = %s", (category_id,))
+    old_row = cur.fetchone()
+    cur.execute("UPDATE categories SET name = %s WHERE id = %s", (name, category_id))
     if old_row:
-        cur.execute("UPDATE products SET category = ? WHERE category = ?", (name, old_row["name"]))
+        cur.execute("UPDATE products SET category = %s WHERE category = %s", (name, old_row["name"]))
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
@@ -374,9 +412,10 @@ def update_category(category_id: int) -> Any:
 
 @app.route("/api/categories/<int:category_id>", methods=["DELETE"])
 def delete_category(category_id: int) -> Any:
+    ensure_db_ready()
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+    cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
@@ -384,14 +423,18 @@ def delete_category(category_id: int) -> Any:
 
 @app.route("/api/products")
 def products() -> Any:
+    ensure_db_ready()
     conn = get_db()
-    rows = conn.execute("SELECT * FROM products ORDER BY id ASC").fetchall()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM products ORDER BY id ASC")
+    rows = cur.fetchall()
     conn.close()
     return jsonify(rows_to_dicts(rows))
 
 
 @app.route("/api/products", methods=["POST"])
 def create_product() -> Any:
+    ensure_db_ready()
     payload = request.get_json(silent=True) or {}
     form = request.form or {}
 
@@ -402,17 +445,12 @@ def create_product() -> Any:
 
     file = request.files.get("image")
     if file and file.filename:
-        filename = secure_filename(file.filename)
-        ext = filename.rsplit(".", 1)[-1].lower()
-        if ext in ALLOWED_EXTENSIONS:
-            target = UPLOAD_DIR / filename
-            counter = 1
-            while target.exists():
-                stem = Path(filename).stem
-                target = UPLOAD_DIR / f"{stem}-{counter}.{ext}"
-                counter += 1
-            file.save(target)
-            image_url = f"/uploads/{target.name}"
+        try:
+            image_url = upload_to_storage(file)
+        except ValueError:
+            return jsonify({"error": "invalid file type"}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
 
     if not name or not category:
         return jsonify({"error": "name and category are required"}), 400
@@ -420,11 +458,11 @@ def create_product() -> Any:
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO products (name, category, image_url, link) VALUES (?, ?, ?, ?)",
+        "INSERT INTO products (name, category, image_url, link) VALUES (%s, %s, %s, %s) RETURNING id",
         (name, category, image_url, link),
     )
+    new_id = cur.fetchone()["id"]
     conn.commit()
-    new_id = cur.lastrowid
     conn.close()
 
     return jsonify(
@@ -440,6 +478,7 @@ def create_product() -> Any:
 
 @app.route("/api/products/<int:product_id>", methods=["PUT"])
 def update_product(product_id: int) -> Any:
+    ensure_db_ready()
     payload = request.get_json(silent=True) or {}
     form = request.form or {}
 
@@ -450,17 +489,12 @@ def update_product(product_id: int) -> Any:
 
     file = request.files.get("image")
     if file and file.filename:
-        filename = secure_filename(file.filename)
-        ext = filename.rsplit(".", 1)[-1].lower()
-        if ext in ALLOWED_EXTENSIONS:
-            target = UPLOAD_DIR / filename
-            counter = 1
-            while target.exists():
-                stem = Path(filename).stem
-                target = UPLOAD_DIR / f"{stem}-{counter}.{ext}"
-                counter += 1
-            file.save(target)
-            image_url = f"/uploads/{target.name}"
+        try:
+            image_url = upload_to_storage(file)
+        except ValueError:
+            return jsonify({"error": "invalid file type"}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 500
 
     if not name or not category:
         return jsonify({"error": "name and category are required"}), 400
@@ -468,7 +502,7 @@ def update_product(product_id: int) -> Any:
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE products SET name = ?, category = ?, image_url = ?, link = ? WHERE id = ?",
+        "UPDATE products SET name = %s, category = %s, image_url = %s, link = %s WHERE id = %s",
         (name, category, image_url, link, product_id),
     )
     conn.commit()
@@ -478,9 +512,10 @@ def update_product(product_id: int) -> Any:
 
 @app.route("/api/products/<int:product_id>", methods=["DELETE"])
 def delete_product(product_id: int) -> Any:
+    ensure_db_ready()
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("DELETE FROM products WHERE id = ?", (product_id,))
+    cur.execute("DELETE FROM products WHERE id = %s", (product_id,))
     conn.commit()
     conn.close()
     return jsonify({"status": "ok"})
@@ -488,6 +523,7 @@ def delete_product(product_id: int) -> Any:
 
 @app.route("/api/admin/login", methods=["POST"])
 def admin_login() -> Any:
+    ensure_db_ready()
     payload = request.get_json(silent=True) or {}
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", "")).strip()
@@ -496,10 +532,12 @@ def admin_login() -> Any:
         return jsonify({"error": "missing credentials"}), 400
 
     conn = get_db()
-    row = conn.execute(
-        "SELECT id FROM admin_users WHERE username = ? AND password = ?",
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id FROM admin_users WHERE username = %s AND password = %s",
         (username, password),
-    ).fetchone()
+    )
+    row = cur.fetchone()
     conn.close()
 
     if not row:
@@ -510,14 +548,18 @@ def admin_login() -> Any:
 
 @app.route("/api/contacts")
 def get_contacts() -> Any:
+    ensure_db_ready()
     conn = get_db()
-    row = conn.execute("SELECT * FROM contacts LIMIT 1").fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM contacts LIMIT 1")
+    row = cur.fetchone()
     conn.close()
     return jsonify(dict(row) if row else {})
 
 
 @app.route("/api/contacts", methods=["POST"])
 def update_contacts() -> Any:
+    ensure_db_ready()
     payload = request.get_json(silent=True) or {}
     facebook = str(payload.get("facebook", "")).strip()
     instagram = str(payload.get("instagram", "")).strip()
@@ -527,7 +569,7 @@ def update_contacts() -> Any:
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE contacts SET facebook = ?, instagram = ?, tiktok = ?, shopee = ? WHERE id = 1",
+        "UPDATE contacts SET facebook = %s, instagram = %s, tiktok = %s, shopee = %s WHERE id = 1",
         (facebook, instagram, tiktok, shopee),
     )
     conn.commit()
@@ -537,8 +579,11 @@ def update_contacts() -> Any:
 
 @app.route("/r/<int:product_id>")
 def affiliate_redirect(product_id: int) -> Any:
+    ensure_db_ready()
     conn = get_db()
-    row = conn.execute("SELECT link FROM products WHERE id = ?", (product_id,)).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT link FROM products WHERE id = %s", (product_id,))
+    row = cur.fetchone()
     conn.close()
     if not row or not row["link"]:
         return jsonify({"error": "link not found"}), 404
@@ -551,5 +596,4 @@ def uploads(filename: str) -> Any:
 
 
 if __name__ == "__main__":
-    init_db()
     app.run(debug=True, port=5500)
