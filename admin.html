@@ -36,7 +36,8 @@
 
     <section class="admin admin-section" aria-label="Quản trị sản phẩm">
       <div class="admin-title">Quản trị sản phẩm</div>
-      <form id="productForm" class="admin-form">
+      <p class="admin-hint">Ảnh sản phẩm lấy từ Supabase và hiển thị theo dạng lưới chi tiết để dễ thêm, sửa, xóa.</p>
+      <form id="productForm" class="admin-form admin-form--compact">
         <input id="productName" type="text" placeholder="Tên sản phẩm" required />
         <select id="productCategory" required></select>
         <input id="productImage" type="file" accept="image/*" />
@@ -49,7 +50,7 @@
 
     <section class="admin admin-section" aria-label="Quản trị sản phẩm nổi bật">
       <div class="admin-title">Quản trị sản phẩm nổi bật</div>
-      <form id="featuredForm" class="admin-form">
+      <form id="featuredForm" class="admin-form admin-form--compact">
         <input id="featuredProductSearch" type="text" list="featuredProductOptions" placeholder="Tìm sản phẩm" required />
         <datalist id="featuredProductOptions"></datalist>
         <input id="featuredProductId" type="hidden" />
@@ -60,7 +61,7 @@
 
     <section class="admin admin-section" aria-label="Quản trị liên hệ">
       <div class="admin-title">Quản trị liên hệ</div>
-      <form id="contactForm" class="admin-form">
+      <form id="contactForm" class="admin-form admin-form--stack">
         <input id="contactFacebookInput" type="url" placeholder="Facebook URL" />
         <input id="contactInstagramInput" type="url" placeholder="Instagram URL" />
         <input id="contactTiktokInput" type="url" placeholder="TikTok URL" />

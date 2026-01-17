@@ -15,12 +15,20 @@
   <meta name="generator" content="Vercel" />
 </head>
 <body>
+  <div class="page-loader" id="pageLoader" aria-live="polite" aria-busy="true">
+    <div class="page-loader-content">
+      <div class="page-loader-text">Chờ xíu nha bà...</div>
+      <div class="page-loader-track">
+        <div class="page-loader-cat" aria-hidden="true">😻‍</div>
+      </div>
+    </div>
+  </div>
   <main class="container">
     <section class="banner" aria-label="Banner">
       <div class="profile" id="profile">
         <div class="profile-info">
           <h1 class="name">
-            <span class="profile-name" id="profileName" style="font-size: 13px;"><span id="profileNameText"></span></span>
+            <span class="profile-name" id="profileName" style="font-size: 12px;"><span id="profileNameText"></span></span>
           </h1>
         </div>
       </div>
@@ -63,8 +71,7 @@
     <div id="productSentinel" aria-hidden="true"></div>
 
     <footer class="site-footer">
-      <a href="/privacy">Privacy Policy</a>
-      <a href="/api/profile">API</a>
+      <a href="">Privacy Policy</a>
     </footer>
 
   </main>

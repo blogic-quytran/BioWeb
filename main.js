@@ -44,10 +44,13 @@ const contactForm = document.querySelector('#contactForm');
 const contactFacebookInput = document.querySelector('#contactFacebookInput');
 const contactInstagramInput = document.querySelector('#contactInstagramInput');
 const contactTiktokInput = document.querySelector('#contactTiktokInput');
+const contactShopeeInput = document.querySelector('#contactShopeeInput');
 const contactFacebookLink = document.querySelector('#contactFacebook');
 const contactInstagramLink = document.querySelector('#contactInstagram');
 const contactTiktokLink = document.querySelector('#contactTiktok');
+const contactShopeeLink = document.querySelector('#contactShopee');
 const toast = document.querySelector('#toast');
+const pageLoader = document.querySelector('#pageLoader');
 
 let allProducts = [];
 let allCategories = [];
@@ -72,16 +75,73 @@ const getSupabaseClient = () => {
 	return supabaseClient;
 };
 
+const resizeImage = (file, options = {}) => new Promise((resolve, reject) => {
+	const {
+		maxWidth = 1600,
+		maxHeight = 1600,
+		quality = 0.9,
+		format = 'image/webp',
+	} = options;
+
+	if (!file.type.startsWith('image/')) {
+		resolve({ blob: file, contentType: file.type || 'application/octet-stream', ext: '' });
+		return;
+	}
+
+	const img = new Image();
+	const url = URL.createObjectURL(file);
+	img.onload = () => {
+		URL.revokeObjectURL(url);
+		const ratio = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+		const width = Math.round(img.width * ratio);
+		const height = Math.round(img.height * ratio);
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) {
+			reject(new Error('Canvas not supported'));
+			return;
+		}
+		ctx.drawImage(img, 0, 0, width, height);
+		canvas.toBlob(
+			(blob) => {
+				if (!blob) {
+					reject(new Error('Failed to compress image'));
+					return;
+				}
+				const ext = format === 'image/webp' ? 'webp' : format === 'image/jpeg' ? 'jpg' : '';
+				resolve({ blob, contentType: format, ext });
+			},
+			format,
+			quality,
+		);
+	};
+	img.onerror = () => {
+		URL.revokeObjectURL(url);
+		reject(new Error('Invalid image'));
+	};
+	img.src = url;
+});
+
 const uploadToSupabase = async (file, folder = 'uploads') => {
 	const client = getSupabaseClient();
 	if (!client) return null;
 	const bucket = supabaseConfig.bucket || 'uploads';
-	const ext = file.name.includes('.') ? file.name.split('.').pop() : '';
-	const safeName = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext ? `.${ext}` : ''}`;
+
+	const { blob, contentType, ext } = await resizeImage(file, {
+		maxWidth: 1600,
+		maxHeight: 1600,
+		quality: 0.9,
+		format: 'image/webp',
+	});
+
+	const safeExt = ext || (file.name.includes('.') ? file.name.split('.').pop() : '');
+	const safeName = `${Date.now()}-${Math.random().toString(36).slice(2)}${safeExt ? `.${safeExt}` : ''}`;
 	const path = `${folder}/${safeName}`;
-	const { error } = await client.storage.from(bucket).upload(path, file, {
+	const { error } = await client.storage.from(bucket).upload(path, blob, {
 		upsert: true,
-		contentType: file.type || 'application/octet-stream',
+		contentType,
 	});
 	if (error) throw error;
 	const { data } = client.storage.from(bucket).getPublicUrl(path);
@@ -343,26 +403,55 @@ const renderAdminList = (items) => {
 const renderFeaturedAdminList = (items) => {
 	if (!featuredAdminList) return;
 	featuredAdminList.innerHTML = '';
-	featuredAdminList.className = 'admin-list admin-grid admin-grid--featured';
-	featuredAdminList.appendChild(
-		buildAdminRow(['ID', 'Tên', 'Product ID', 'Ảnh', 'Link', 'Thao tác'], true),
-	);
+	featuredAdminList.className = 'admin-list admin-grid--product-cards';
 	items.forEach((item) => {
+		const card = document.createElement('article');
+		card.className = 'admin-card';
+
+		const media = document.createElement('div');
+		media.className = 'admin-card-media';
 		const imageUrl = item.product_image || item.image_url || '';
-		const linkUrl = item.product_link || '';
+		if (imageUrl) {
+			media.style.backgroundImage = `url(${imageUrl})`;
+		}
+
+		const body = document.createElement('div');
+		body.className = 'admin-card-body';
+
+		const title = document.createElement('div');
+		title.className = 'admin-card-title';
+		title.textContent = item.product_name || item.name || '';
+
+		const meta = document.createElement('div');
+		meta.className = 'admin-card-meta';
+		const featuredChip = document.createElement('span');
+		featuredChip.className = 'admin-chip';
+		featuredChip.textContent = 'Nổi bật';
+		const idTag = document.createElement('span');
+		idTag.className = 'admin-id';
+		idTag.textContent = item.product_id ? `ID SP: ${item.product_id}` : 'ID SP: -';
+		meta.appendChild(featuredChip);
+		meta.appendChild(idTag);
+
+		const links = document.createElement('div');
+		links.className = 'admin-card-links';
 		const imageLink = document.createElement('a');
 		imageLink.className = 'admin-link';
 		imageLink.href = imageUrl || '#';
 		imageLink.target = '_blank';
 		imageLink.rel = 'noopener';
-		imageLink.textContent = imageUrl ? 'Xem ảnh' : '-';
+		imageLink.textContent = imageUrl ? 'Ảnh (Supabase)' : 'Chưa có ảnh';
 
+		const linkUrl = item.product_link || '';
 		const productLink = document.createElement('a');
 		productLink.className = 'admin-link';
 		productLink.href = linkUrl || '#';
 		productLink.target = '_blank';
 		productLink.rel = 'noopener';
-		productLink.textContent = linkUrl ? 'Mở link' : '-';
+		productLink.textContent = linkUrl ? 'Link sản phẩm' : 'Chưa có link';
+
+		links.appendChild(imageLink);
+		links.appendChild(productLink);
 
 		const edit = document.createElement('button');
 		edit.type = 'button';
@@ -392,19 +481,14 @@ const renderFeaturedAdminList = (items) => {
 		actions.appendChild(edit);
 		actions.appendChild(del);
 
-		featuredAdminList.appendChild(
-			buildAdminRow(
-				[
-					String(item.id),
-					item.product_name || item.name || '',
-					item.product_id ? String(item.product_id) : '-',
-					imageLink,
-					productLink,
-					actions,
-				],
-				false,
-			),
-		);
+		body.appendChild(title);
+		body.appendChild(meta);
+		body.appendChild(links);
+		body.appendChild(actions);
+
+		card.appendChild(media);
+		card.appendChild(body);
+		featuredAdminList.appendChild(card);
 	});
 };
 
@@ -568,6 +652,7 @@ if (contactForm) {
 			facebook: contactFacebookInput ? contactFacebookInput.value.trim() : '',
 			instagram: contactInstagramInput ? contactInstagramInput.value.trim() : '',
 			tiktok: contactTiktokInput ? contactTiktokInput.value.trim() : '',
+			shopee: contactShopeeInput ? contactShopeeInput.value.trim() : '',
 		};
 		await fetch('/api/contacts', {
 			method: 'POST',
@@ -709,6 +794,10 @@ const setContactLinks = (contacts) => {
 		contactTiktokLink.href = contacts.tiktok || '#';
 		contactTiktokLink.classList.toggle('hidden', !contacts.tiktok);
 	}
+	if (contactShopeeLink) {
+		contactShopeeLink.href = contacts.shopee || '#';
+		contactShopeeLink.classList.toggle('hidden', !contacts.shopee);
+	}
 };
 
 const loadCategories = async () => {
@@ -719,16 +808,22 @@ const loadCategories = async () => {
 	renderCategoryList(allCategories);
 };
 
-const loadContacts = async () => {
+const loadContacts = async (fillAdmin = true) => {
 	const contactsRes = await fetch('/api/contacts');
 	const contacts = await contactsRes.json();
 	setContactLinks(contacts);
-	if (contactFacebookInput) contactFacebookInput.value = contacts.facebook || '';
-	if (contactInstagramInput) contactInstagramInput.value = contacts.instagram || '';
-	if (contactTiktokInput) contactTiktokInput.value = contacts.tiktok || '';
+	if (fillAdmin) {
+		if (contactFacebookInput) contactFacebookInput.value = contacts.facebook || '';
+		if (contactInstagramInput) contactInstagramInput.value = contacts.instagram || '';
+		if (contactTiktokInput) contactTiktokInput.value = contacts.tiktok || '';
+		if (contactShopeeInput) contactShopeeInput.value = contacts.shopee || '';
+	}
 };
 
-const loadData = async () => {
+const loadData = async (fillAdmin = true) => {
+	if (pageLoader) {
+		pageLoader.classList.remove('hidden');
+	}
 	const profileRes = await fetch('/api/profile');
 	const profile = await profileRes.json();
 	currentProfile = profile;
@@ -742,14 +837,16 @@ const loadData = async () => {
 		if (profileDesc) {
 			profileDesc.textContent = profile.description || '';
 		}
-		if (profileAdminName) {
-			profileAdminName.value = profile.name || '';
-		}
-		if (profileAdminDesc) {
-			profileAdminDesc.value = profile.description || '';
-		}
-		if (profileAdminAvatar) {
-			profileAdminAvatar.value = profile.avatar_url || '';
+		if (fillAdmin) {
+			if (profileAdminName) {
+				profileAdminName.value = profile.name || '';
+			}
+			if (profileAdminDesc) {
+				profileAdminDesc.value = profile.description || '';
+			}
+			if (profileAdminAvatar) {
+				profileAdminAvatar.value = profile.avatar_url || '';
+			}
 		}
 
 		if (badgeList) {
@@ -770,16 +867,29 @@ const loadData = async () => {
 		}
 
 	await loadCategories();
-	await loadContacts();
+	await loadContacts(fillAdmin);
 	await loadFeatured();
 	await loadProducts();
+	if (pageLoader) {
+		pageLoader.classList.add('hidden');
+	}
 };
 
-loadData();
+const bootAdminData = () => {
+	const fillAdmin = !adminLoginOverlay || adminLoginOverlay.classList.contains('hidden');
+	loadData(fillAdmin);
+};
+
+if (document.readyState === 'loading') {
+	document.addEventListener('DOMContentLoaded', bootAdminData);
+} else {
+	bootAdminData();
+}
 
 window.addEventListener('scroll', handleProductScroll);
 
 if (adminLoginOverlay) {
+	adminLoginOverlay.classList.remove('hidden');
 	setAdminVisible(false);
 	adminLoginForm.addEventListener('submit', async (event) => {
 		event.preventDefault();
@@ -805,6 +915,7 @@ if (adminLoginOverlay) {
 			adminLoginMessage.textContent = '';
 			adminLoginForm.reset();
 			setAdminVisible(true);
+			await loadData(true);
 		} else {
 			adminLoginMessage.textContent = 'Sai user hoặc password';
 			setAdminVisible(false);
