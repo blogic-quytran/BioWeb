@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shop Profile</title>
+  <meta name="description" content="Trang hồ sơ shop thời trang, sản phẩm nổi bật và danh sách sản phẩm mới nhất." />
+  <meta name="robots" content="index,follow" />
+  <meta property="og:title" content="Shop Profile" />
+  <meta property="og:description" content="Hồ sơ shop thời trang với sản phẩm nổi bật và danh sách sản phẩm." />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="vi_VN" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+</head>
+<body>
+  <main class="container">
+    <section class="banner" aria-label="Banner">
+      <div class="profile" id="profile">
+        <div class="profile-info">
+          <h1 class="name">
+            <span class="profile-name" id="profileName"><span id="profileNameText">Admin</span></span>
+          </h1>
+        </div>
+      </div>
+      <div class="profile-desc" id="profileDesc"></div>
+      <div class="contact-icons" aria-label="Liên hệ">
+        <a id="contactShopee" class="contact-icon" style="width: 100px;" href="https://shopee.vn/" target="_blank" rel="noopener" aria-label="Shopee Video">
+          <i class="bi bi-play-circle" aria-hidden="true"></i>
+          <span class="contact-text" style="font-size: 11px;">Shopee Video</span>
+        </a>
+        <a id="contactFacebook" class="contact-icon" href="#" target="_blank" rel="noopener" aria-label="Facebook">
+          <i class="bi bi-facebook"></i>
+        </a>
+        <a id="contactInstagram" class="contact-icon" href="#" target="_blank" rel="noopener" aria-label="Instagram">
+          <i class="bi bi-instagram"></i>
+        </a>
+        <a id="contactTiktok" class="contact-icon" href="#" target="_blank" rel="noopener" aria-label="TikTok">
+          <i class="bi bi-tiktok"></i>
+        </a>
+      </div>
+    </section>
+    <section class="featured" aria-label="Sản phẩm nổi bật">
+      <h2 class="section-title featured-title">SẢN PHẨM NỔI BẬT</h2>
+      <button class="slider-btn prev" id="featuredPrev" type="button" aria-label="Prev">
+        <i class="bi bi-chevron-left" aria-hidden="true"></i>
+      </button>
+      <div class="cards slider" id="featuredList"></div>
+      <button class="slider-btn next" id="featuredNext" type="button" aria-label="Next">
+        <i class="bi bi-chevron-right" aria-hidden="true"></i>
+      </button>
+    </section>
+
+    <section class="search" aria-label="Tìm kiếm">
+      <input id="searchInput" type="search" placeholder="Tìm kiếm sản phẩm" />
+    </section>
+
+    <section class="chips" id="chipList" aria-label="Bộ lọc"></section>
+
+    <section class="grid" id="productList" aria-label="Danh sách sản phẩm"></section>
+
+    <footer class="site-footer">
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/api/profile">API</a>
+    </footer>
+
+  </main>
+
+  <script src="main.js"></script>
+</body>
+</html>
