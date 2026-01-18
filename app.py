@@ -4,6 +4,7 @@ import os
 from uuid import uuid4
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -223,6 +224,23 @@ def upload_to_storage(file) -> str:
     return supabase.storage.from_(SUPABASE_STORAGE_BUCKET).get_public_url(unique_name)
 
 
+def delete_from_storage(public_url: str) -> None:
+    if not supabase or not public_url:
+        return
+    try:
+        parsed = urlparse(public_url)
+        path = parsed.path
+        prefix = f"/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET}/"
+        if prefix not in path:
+            return
+        object_path = path.split(prefix, 1)[1]
+        if not object_path:
+            return
+        supabase.storage.from_(SUPABASE_STORAGE_BUCKET).remove([object_path])
+    except Exception:
+        return
+
+
 @app.route("/")
 def index() -> Any:
     return send_from_directory(BASE_DIR, "index.html")
@@ -356,6 +374,10 @@ def delete_featured(featured_id: int) -> Any:
     ensure_db_ready()
     conn = get_db()
     cur = conn.cursor()
+    cur.execute("SELECT image_url FROM featured WHERE id = %s", (featured_id,))
+    row = cur.fetchone()
+    if row and row.get("image_url"):
+        delete_from_storage(row["image_url"])
     cur.execute("DELETE FROM featured WHERE id = %s", (featured_id,))
     conn.commit()
     conn.close()
@@ -488,19 +510,27 @@ def update_product(product_id: int) -> Any:
     link = str(form.get("link") or payload.get("link", "")).strip()
 
     file = request.files.get("image")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT image_url FROM products WHERE id = %s", (product_id,))
+    old_row = cur.fetchone()
+    old_image_url = old_row["image_url"] if old_row and old_row.get("image_url") else ""
     if file and file.filename:
         try:
             image_url = upload_to_storage(file)
         except ValueError:
+            conn.close()
             return jsonify({"error": "invalid file type"}), 400
         except RuntimeError as exc:
+            conn.close()
             return jsonify({"error": str(exc)}), 500
+
+    if old_image_url and image_url and old_image_url != image_url:
+        delete_from_storage(old_image_url)
 
     if not name or not category:
         return jsonify({"error": "name and category are required"}), 400
 
-    conn = get_db()
-    cur = conn.cursor()
     cur.execute(
         "UPDATE products SET name = %s, category = %s, image_url = %s, link = %s WHERE id = %s",
         (name, category, image_url, link, product_id),
@@ -515,6 +545,10 @@ def delete_product(product_id: int) -> Any:
     ensure_db_ready()
     conn = get_db()
     cur = conn.cursor()
+    cur.execute("SELECT image_url FROM products WHERE id = %s", (product_id,))
+    row = cur.fetchone()
+    if row and row.get("image_url"):
+        delete_from_storage(row["image_url"])
     cur.execute("DELETE FROM products WHERE id = %s", (product_id,))
     conn.commit()
     conn.close()

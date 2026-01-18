@@ -15,10 +15,16 @@ const productForm = document.querySelector('#productForm');
 const productNameInput = document.querySelector('#productName');
 const productCategoryInput = document.querySelector('#productCategory');
 const productImageInput = document.querySelector('#productImage');
+const productImagePreview = document.querySelector('#productImagePreview');
+const productImageDropzone = document.querySelector('#productImageDropzone');
 const productLinkInput = document.querySelector('#productLink');
 const productIdInput = document.querySelector('#productId');
 const productSubmit = document.querySelector('#productSubmit');
 const adminList = document.querySelector('#adminList');
+const adminProductPagination = document.querySelector('#adminProductPagination');
+const adminProductPrev = document.querySelector('#adminProductPrev');
+const adminProductNext = document.querySelector('#adminProductNext');
+const adminProductPageInfo = document.querySelector('#adminProductPageInfo');
 const featuredForm = document.querySelector('#featuredForm');
 const featuredProductSearch = document.querySelector('#featuredProductSearch');
 const featuredProductOptions = document.querySelector('#featuredProductOptions');
@@ -31,6 +37,13 @@ const adminLoginForm = document.querySelector('#adminLoginForm');
 const adminUser = document.querySelector('#adminUser');
 const adminPass = document.querySelector('#adminPass');
 const adminLoginMessage = document.querySelector('#adminLoginMessage');
+const progressOverlay = document.querySelector('#progressOverlay');
+const cropOverlay = document.querySelector('#cropOverlay');
+const cropImage = document.querySelector('#cropImage');
+const cropCancel = document.querySelector('#cropCancel');
+const cropConfirm = document.querySelector('#cropConfirm');
+const cropZoomIn = document.querySelector('#cropZoomIn');
+const cropZoomOut = document.querySelector('#cropZoomOut');
 const profileAdminForm = document.querySelector('#profileAdminForm');
 const profileAdminName = document.querySelector('#profileAdminName');
 const profileAdminDesc = document.querySelector('#profileAdminDesc');
@@ -60,9 +73,16 @@ let featuredTimer = null;
 let editingProductImageUrl = '';
 let editingFeaturedId = null;
 let currentProfile = null;
+let currentContacts = null;
+let cropperInstance = null;
+let croppedProductFile = null;
+let cropperReady = false;
+let cropImageUrl = '';
 let filteredProducts = [];
 let visibleProductCount = 6;
 const PRODUCT_PAGE_SIZE = 6;
+const ADMIN_PRODUCT_PAGE_SIZE = 12;
+let adminProductPage = 1;
 
 const supabaseConfig = window.SUPABASE_CONFIG || {};
 let supabaseClient = null;
@@ -192,6 +212,147 @@ const showToast = (message) => {
 	setTimeout(() => toast.classList.remove('show'), 1800);
 };
 
+const showProgress = () => {
+	if (!progressOverlay) return;
+	progressOverlay.classList.remove('hidden');
+};
+
+const hideProgress = () => {
+	if (!progressOverlay) return;
+	progressOverlay.classList.add('hidden');
+};
+
+const resetProductPreview = () => {
+	croppedProductFile = null;
+	if (productImagePreview) {
+		productImagePreview.src = '';
+		productImagePreview.classList.remove('is-visible');
+	}
+};
+
+const openCropper = (file) => {
+	if (!cropOverlay || !cropImage || !window.Cropper) return;
+	cropperReady = false;
+	if (cropImageUrl) {
+		URL.revokeObjectURL(cropImageUrl);
+		cropImageUrl = '';
+	}
+	cropImageUrl = URL.createObjectURL(file);
+	cropOverlay.classList.remove('hidden');
+	if (cropperInstance) {
+		cropperInstance.destroy();
+		cropperInstance = null;
+	}
+	cropImage.onload = () => {
+		cropperInstance = new window.Cropper(cropImage, {
+			dragMode: 'move',
+			aspectRatio: 9 / 16,
+			viewMode: 1,
+			autoCropArea: 1,
+			background: false,
+			zoomable: true,
+			zoomOnWheel: true,
+			ready() {
+				cropperReady = true;
+			},
+		});
+	};
+	cropImage.onerror = () => {
+		showToast('Không thể mở ảnh');
+		closeCropper();
+	};
+	cropImage.src = cropImageUrl;
+};
+
+const closeCropper = () => {
+	if (cropperInstance) {
+		cropperInstance.destroy();
+		cropperInstance = null;
+	}
+	cropperReady = false;
+	if (cropImageUrl) {
+		URL.revokeObjectURL(cropImageUrl);
+		cropImageUrl = '';
+	}
+	if (cropOverlay) {
+		cropOverlay.classList.add('hidden');
+	}
+};
+
+if (productImageInput) {
+	productImageInput.addEventListener('change', () => {
+		const file = productImageInput.files && productImageInput.files[0];
+		if (!file) {
+			resetProductPreview();
+			return;
+		}
+		openCropper(file);
+	});
+}
+
+if (productImageDropzone) {
+	productImageDropzone.addEventListener('dragover', (event) => {
+		event.preventDefault();
+		productImageDropzone.classList.add('dragover');
+	});
+	productImageDropzone.addEventListener('dragleave', () => {
+		productImageDropzone.classList.remove('dragover');
+	});
+	productImageDropzone.addEventListener('drop', (event) => {
+		event.preventDefault();
+		productImageDropzone.classList.remove('dragover');
+		const file = event.dataTransfer?.files?.[0];
+		if (file) {
+			openCropper(file);
+		}
+	});
+}
+
+if (cropCancel) {
+	cropCancel.addEventListener('click', () => {
+		resetProductPreview();
+		if (productImageInput) productImageInput.value = '';
+		closeCropper();
+	});
+}
+
+if (cropConfirm) {
+	cropConfirm.addEventListener('click', async () => {
+		if (!cropperInstance) return;
+		const canvas = cropperInstance.getCroppedCanvas({ width: 900 });
+		canvas.toBlob((blob) => {
+			if (!blob) return;
+			croppedProductFile = new File([blob], `cropped-${Date.now()}.webp`, {
+				type: 'image/webp',
+			});
+			if (productImagePreview) {
+				productImagePreview.src = URL.createObjectURL(blob);
+				productImagePreview.classList.add('is-visible');
+			}
+			closeCropper();
+		}, 'image/webp', 0.9);
+	});
+}
+
+if (cropZoomIn) {
+	cropZoomIn.addEventListener('click', () => {
+		if (cropperInstance && cropperReady) cropperInstance.zoom(0.1);
+	});
+}
+
+if (cropZoomOut) {
+	cropZoomOut.addEventListener('click', () => {
+		if (cropperInstance && cropperReady) cropperInstance.zoom(-0.1);
+	});
+}
+
+const fillContactInputs = (contacts = {}) => {
+	if (contactFacebookInput) contactFacebookInput.value = contacts.facebook || '';
+	if (contactInstagramInput) contactInstagramInput.value = contacts.instagram || '';
+	if (contactTiktokInput) contactTiktokInput.value = contacts.tiktok || '';
+	if (contactShopeeInput) contactShopeeInput.value = contacts.shopee || '';
+};
+
 const createMedia = (imageUrl) => {
 	const media = document.createElement('div');
 	media.className = 'media';
@@ -308,9 +469,14 @@ const renderProducts = (items) => {
 
 const renderAdminList = (items) => {
 	if (!adminList) return;
+	const totalPages = Math.max(1, Math.ceil(items.length / ADMIN_PRODUCT_PAGE_SIZE));
+	if (adminProductPage > totalPages) adminProductPage = totalPages;
+	const startIndex = (adminProductPage - 1) * ADMIN_PRODUCT_PAGE_SIZE;
+	const endIndex = startIndex + ADMIN_PRODUCT_PAGE_SIZE;
+	const pageItems = items.slice(startIndex, endIndex);
 	adminList.innerHTML = '';
 	adminList.className = 'admin-list admin-grid admin-grid--product-cards';
-	items.forEach((item) => {
+	pageItems.forEach((item) => {
 		const card = document.createElement('article');
 		card.className = 'admin-card';
 
@@ -380,8 +546,13 @@ const renderAdminList = (items) => {
 		del.className = 'admin-delete';
 		del.textContent = 'Xóa';
 		del.addEventListener('click', async () => {
-			await fetch(`/api/products/${item.id}`, { method: 'DELETE' });
-			await loadProducts();
+			showProgress();
+			try {
+				await fetch(`/api/products/${item.id}`, { method: 'DELETE' });
+				await loadProducts();
+			} finally {
+				hideProgress();
+			}
 		});
 
 		const actions = document.createElement('div');
@@ -398,6 +569,14 @@ const renderAdminList = (items) => {
 		card.appendChild(body);
 		adminList.appendChild(card);
 	});
+	if (adminProductPagination) {
+		adminProductPagination.classList.toggle('hidden', totalPages <= 1);
+		if (adminProductPageInfo) {
+			adminProductPageInfo.textContent = `Trang ${adminProductPage} / ${totalPages}`;
+		}
+		if (adminProductPrev) adminProductPrev.disabled = adminProductPage <= 1;
+		if (adminProductNext) adminProductNext.disabled = adminProductPage >= totalPages;
+	}
 };
 
 const renderFeaturedAdminList = (items) => {
@@ -533,7 +712,7 @@ if (productForm) {
 	event.preventDefault();
 	const name = productNameInput.value.trim();
 	const category = productCategoryInput.value.trim();
-	const file = productImageInput.files[0];
+	const file = croppedProductFile || productImageInput.files[0];
 	const link = productLinkInput ? productLinkInput.value.trim() : '';
 	const productId = productIdInput ? productIdInput.value : '';
 
@@ -542,6 +721,7 @@ if (productForm) {
 	}
 
 	let res = null;
+	showProgress();
 	try {
 		if (file && getSupabaseClient()) {
 			const imageUrl = await uploadToSupabase(file, 'products');
@@ -571,6 +751,8 @@ if (productForm) {
 	} catch (error) {
 		showToast('Lỗi upload ảnh');
 		return;
+	} finally {
+		hideProgress();
 	}
 
 	if (res && res.ok) {
@@ -578,6 +760,7 @@ if (productForm) {
 	}
 
 	productForm.reset();
+	resetProductPreview();
 	if (productIdInput) productIdInput.value = '';
 	editingProductImageUrl = '';
 	if (productSubmit) productSubmit.textContent = 'Thêm sản phẩm';
@@ -669,6 +852,7 @@ const loadProducts = async () => {
 	allProducts = await productsRes.json();
 	filteredProducts = allProducts;
 	visibleProductCount = PRODUCT_PAGE_SIZE;
+	adminProductPage = 1;
 	renderFeaturedProductOptions(allProducts);
 	filterProducts();
 	renderAdminList(allProducts);
@@ -811,12 +995,10 @@ const loadCategories = async () => {
 const loadContacts = async (fillAdmin = true) => {
 	const contactsRes = await fetch('/api/contacts');
 	const contacts = await contactsRes.json();
+	currentContacts = contacts;
 	setContactLinks(contacts);
 	if (fillAdmin) {
-		if (contactFacebookInput) contactFacebookInput.value = contacts.facebook || '';
-		if (contactInstagramInput) contactInstagramInput.value = contacts.instagram || '';
-		if (contactTiktokInput) contactTiktokInput.value = contacts.tiktok || '';
-		if (contactShopeeInput) contactShopeeInput.value = contacts.shopee || '';
+		fillContactInputs(contacts);
 	}
 };
 
@@ -843,9 +1025,6 @@ const loadData = async (fillAdmin = true) => {
 			}
 			if (profileAdminDesc) {
 				profileAdminDesc.value = profile.description || '';
-			}
-			if (profileAdminAvatar) {
-				profileAdminAvatar.value = profile.avatar_url || '';
 			}
 		}
 
@@ -916,6 +1095,9 @@ if (adminLoginOverlay) {
 			adminLoginForm.reset();
 			setAdminVisible(true);
 			await loadData(true);
+			if (currentContacts) {
+				fillContactInputs(currentContacts);
+			}
 		} else {
 			adminLoginMessage.textContent = 'Sai user hoặc password';
 			setAdminVisible(false);
@@ -989,6 +1171,25 @@ if (featuredNext) {
 		featuredIndex = featuredIndex >= maxIndex ? 0 : featuredIndex + 1;
 		updateFeaturedPosition();
 		startFeaturedAuto();
+	});
+}
+
+if (adminProductPrev) {
+	adminProductPrev.addEventListener('click', () => {
+		if (adminProductPage > 1) {
+			adminProductPage -= 1;
+			renderAdminList(allProducts);
+		}
+	});
+}
+
+if (adminProductNext) {
+	adminProductNext.addEventListener('click', () => {
+		const totalPages = Math.max(1, Math.ceil(allProducts.length / ADMIN_PRODUCT_PAGE_SIZE));
+		if (adminProductPage < totalPages) {
+			adminProductPage += 1;
+			renderAdminList(allProducts);
+		}
 	});
 }
 
