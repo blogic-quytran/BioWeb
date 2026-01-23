@@ -4,6 +4,7 @@ const featuredList = document.querySelector('#featuredList');
 const featuredPrev = document.querySelector('#featuredPrev');
 const featuredNext = document.querySelector('#featuredNext');
 const productList = document.querySelector('#productList');
+const productSentinel = document.querySelector('#productSentinel');
 const searchInput = document.querySelector('#searchInput');
 const profileName = document.querySelector('#profileName');
 const profileNameText = document.querySelector('#profileNameText');
@@ -80,10 +81,11 @@ let cropperReady = false;
 let cropImageUrl = '';
 let filteredProducts = [];
 let visibleProductCount = 6;
+let adminFilteredProducts = [];
+let adminLoggedIn = false;
 const PRODUCT_PAGE_SIZE = 6;
-const ADMIN_PRODUCT_PAGE_SIZE = 12;
+const ADMIN_PRODUCT_PAGE_SIZE = 8;
 let adminProductPage = 1;
-
 const supabaseConfig = window.SUPABASE_CONFIG || {};
 let supabaseClient = null;
 
@@ -95,6 +97,25 @@ const getSupabaseClient = () => {
 	return supabaseClient;
 };
 
+const getAdminLoginState = () => adminLoggedIn;
+
+const setAdminLoginState = (value) => {
+	adminLoggedIn = Boolean(value);
+};
+
+const hideAdminOverlay = () => {
+	if (!adminLoginOverlay) return;
+	adminLoginOverlay.classList.add('hidden');
+	adminLoginOverlay.setAttribute('aria-hidden', 'true');
+	adminLoginOverlay.setAttribute('hidden', '');
+};
+
+const showAdminOverlay = () => {
+	if (!adminLoginOverlay) return;
+	adminLoginOverlay.classList.remove('hidden');
+	adminLoginOverlay.removeAttribute('hidden');
+	adminLoginOverlay.setAttribute('aria-hidden', 'false');
+};
 const resizeImage = (file, options = {}) => new Promise((resolve, reject) => {
 	const {
 		maxWidth = 1600,
@@ -475,7 +496,7 @@ const renderAdminList = (items) => {
 	const endIndex = startIndex + ADMIN_PRODUCT_PAGE_SIZE;
 	const pageItems = items.slice(startIndex, endIndex);
 	adminList.innerHTML = '';
-	adminList.className = 'admin-list admin-grid admin-grid--product-cards';
+	adminList.className = 'admin-list admin-grid admin-grid--product-cards admin-grid--product-cards-4';
 	pageItems.forEach((item) => {
 		const card = document.createElement('article');
 		card.className = 'admin-card';
@@ -577,6 +598,24 @@ const renderAdminList = (items) => {
 		if (adminProductPrev) adminProductPrev.disabled = adminProductPage <= 1;
 		if (adminProductNext) adminProductNext.disabled = adminProductPage >= totalPages;
 	}
+};
+
+const sortProductsByName = (items) =>
+	[...items].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi', { sensitivity: 'base' }));
+
+const updateAdminProductView = () => {
+	if (!productCategoryInput) {
+		adminFilteredProducts = sortProductsByName(allProducts);
+		renderAdminList(adminFilteredProducts);
+		return;
+	}
+	const selectedCategory = productCategoryInput.value || 'Tất cả';
+	const baseList = selectedCategory === 'Tất cả'
+		? allProducts
+		: allProducts.filter((item) => item.category === selectedCategory);
+	adminFilteredProducts = sortProductsByName(baseList);
+	adminProductPage = 1;
+	renderAdminList(adminFilteredProducts);
 };
 
 const renderFeaturedAdminList = (items) => {
@@ -719,6 +758,10 @@ if (productForm) {
 	if (!name || !category) {
 		return;
 	}
+	if (category === 'Tất cả') {
+		showToast('Vui lòng chọn danh mục khác ngoài "Tất cả"');
+		return;
+	}
 
 	let res = null;
 	showProgress();
@@ -855,7 +898,7 @@ const loadProducts = async () => {
 	adminProductPage = 1;
 	renderFeaturedProductOptions(allProducts);
 	filterProducts();
-	renderAdminList(allProducts);
+	updateAdminProductView();
 };
 
 const renderFeaturedProductOptions = (items) => {
@@ -908,17 +951,18 @@ const renderChips = (items) => {
 const renderCategoryOptions = (items) => {
 	if (!productCategoryInput) return;
 	productCategoryInput.innerHTML = '';
-	items
-		.filter((item) => item.name !== 'Tất cả')
-		.forEach((item, index) => {
-			const option = document.createElement('option');
-			option.value = item.name;
-			option.textContent = item.name;
-			if (index === 0) {
-				option.selected = true;
-			}
-			productCategoryInput.appendChild(option);
-		});
+	let hasDefault = false;
+	items.forEach((item, index) => {
+		const option = document.createElement('option');
+		option.value = item.name;
+		option.textContent = item.name;
+		if (!hasDefault && (item.name === 'Tất cả' || index === 0)) {
+			option.selected = true;
+			hasDefault = true;
+		}
+		productCategoryInput.appendChild(option);
+	});
+	updateAdminProductView();
 };
 
 const renderCategoryList = (items) => {
@@ -1006,9 +1050,10 @@ const loadData = async (fillAdmin = true) => {
 	if (pageLoader) {
 		pageLoader.classList.remove('hidden');
 	}
-	const profileRes = await fetch('/api/profile');
-	const profile = await profileRes.json();
-	currentProfile = profile;
+	try {
+		const profileRes = await fetch('/api/profile');
+		const profile = await profileRes.json();
+		currentProfile = profile;
 
 		if (profileNameText && profile.name) {
 			profileNameText.textContent = profile.name;
@@ -1045,17 +1090,32 @@ const loadData = async (fillAdmin = true) => {
 			profileCard.style.backgroundImage = `url(${profile.avatar_url})`;
 		}
 
-	await loadCategories();
-	await loadContacts(fillAdmin);
-	await loadFeatured();
-	await loadProducts();
-	if (pageLoader) {
-		pageLoader.classList.add('hidden');
+		await loadCategories();
+		await loadContacts(fillAdmin);
+		await loadFeatured();
+		await loadProducts();
+	} catch (error) {
+		showToast('Không tải được dữ liệu');
+	} finally {
+		if (pageLoader) {
+			pageLoader.classList.add('hidden');
+		}
 	}
 };
 
 const bootAdminData = () => {
-	const fillAdmin = !adminLoginOverlay || adminLoginOverlay.classList.contains('hidden');
+	adminLoggedIn = false;
+	const loggedIn = getAdminLoginState();
+	if (adminLoginOverlay) {
+		if (loggedIn) {
+			hideAdminOverlay();
+			setAdminVisible(true);
+		} else {
+			showAdminOverlay();
+			setAdminVisible(false);
+		}
+	}
+	const fillAdmin = !adminLoginOverlay || loggedIn;
 	loadData(fillAdmin);
 };
 
@@ -1065,12 +1125,29 @@ if (document.readyState === 'loading') {
 	bootAdminData();
 }
 
-window.addEventListener('scroll', handleProductScroll);
+if (productSentinel) {
+	const productObserver = new IntersectionObserver(
+		(entries) => {
+			if (entries.some((entry) => entry.isIntersecting)) {
+				loadMoreProducts();
+			}
+		},
+		{ rootMargin: '200px 0px' },
+	);
+	productObserver.observe(productSentinel);
+}
 
 if (adminLoginOverlay) {
-	adminLoginOverlay.classList.remove('hidden');
-	setAdminVisible(false);
-	adminLoginForm.addEventListener('submit', async (event) => {
+	const loggedIn = getAdminLoginState();
+	if (loggedIn) {
+		hideAdminOverlay();
+		setAdminVisible(true);
+	} else {
+		showAdminOverlay();
+		setAdminVisible(false);
+	}
+	if (adminLoginForm) {
+		adminLoginForm.addEventListener('submit', async (event) => {
 		event.preventDefault();
 		const payload = {
 			username: adminUser.value.trim(),
@@ -1090,7 +1167,8 @@ if (adminLoginOverlay) {
 		});
 
 		if (res.ok) {
-			adminLoginOverlay.classList.add('hidden');
+			setAdminLoginState(true);
+			hideAdminOverlay();
 			adminLoginMessage.textContent = '';
 			adminLoginForm.reset();
 			setAdminVisible(true);
@@ -1099,10 +1177,13 @@ if (adminLoginOverlay) {
 				fillContactInputs(currentContacts);
 			}
 		} else {
+			setAdminLoginState(false);
+			showAdminOverlay();
 			adminLoginMessage.textContent = 'Sai user hoặc password';
 			setAdminVisible(false);
 		}
 	});
+	}
 }
 
 if (profileAdminForm) {
@@ -1178,18 +1259,25 @@ if (adminProductPrev) {
 	adminProductPrev.addEventListener('click', () => {
 		if (adminProductPage > 1) {
 			adminProductPage -= 1;
-			renderAdminList(allProducts);
+			renderAdminList(adminFilteredProducts.length ? adminFilteredProducts : allProducts);
 		}
 	});
 }
 
 if (adminProductNext) {
 	adminProductNext.addEventListener('click', () => {
-		const totalPages = Math.max(1, Math.ceil(allProducts.length / ADMIN_PRODUCT_PAGE_SIZE));
+		const source = adminFilteredProducts.length ? adminFilteredProducts : allProducts;
+		const totalPages = Math.max(1, Math.ceil(source.length / ADMIN_PRODUCT_PAGE_SIZE));
 		if (adminProductPage < totalPages) {
 			adminProductPage += 1;
-			renderAdminList(allProducts);
+			renderAdminList(source);
 		}
+	});
+}
+
+if (productCategoryInput) {
+	productCategoryInput.addEventListener('change', () => {
+		updateAdminProductView();
 	});
 }
 
@@ -1212,11 +1300,7 @@ if (featuredList) {
 
 window.addEventListener('resize', updateFeaturedPosition);
 
-const productListEl = document.getElementById('productList');
 const productLoadingEl = document.getElementById('productLoading');
-const productSentinelEl = document.getElementById('productSentinel');
-const BATCH_SIZE = 6;
-let visibleCount = 0;
 let pendingGetCount = 0;
 
 const showLoading = () => {
@@ -1233,67 +1317,22 @@ const hideLoading = () => {
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {
-  const method =
-    (init && init.method) ||
-    (input && input.method) ||
-    'GET';
-  const isGet = String(method).toUpperCase() === 'GET';
-  if (isGet) {
-    pendingGetCount += 1;
-    showLoading();
-  }
-  try {
-    return await originalFetch(input, init);
-  } finally {
-    if (isGet) {
-      pendingGetCount = Math.max(0, pendingGetCount - 1);
-      if (pendingGetCount === 0) hideLoading();
-    }
-  }
+	const method =
+		(init && init.method) ||
+		(input && input.method) ||
+		'GET';
+	const isGet = String(method).toUpperCase() === 'GET';
+	if (isGet) {
+		pendingGetCount += 1;
+		showLoading();
+	}
+	try {
+		return await originalFetch(input, init);
+	} finally {
+		if (isGet) {
+			pendingGetCount = Math.max(0, pendingGetCount - 1);
+			if (pendingGetCount === 0) hideLoading();
+		}
+	}
 };
 
-const applyLazyBatch = () => {
-  if (!productListEl) return;
-  const items = Array.from(productListEl.children);
-  visibleCount = Math.min(BATCH_SIZE, items.length);
-  items.forEach((item, index) => {
-    item.style.display = index < visibleCount ? '' : 'none';
-  });
-};
-
-const loadNextBatch = () => {
-  if (!productListEl) return;
-  const items = Array.from(productListEl.children);
-  const nextCount = Math.min(visibleCount + BATCH_SIZE, items.length);
-  for (let i = visibleCount; i < nextCount; i += 1) {
-    items[i].style.display = '';
-  }
-  visibleCount = nextCount;
-};
-
-const observeLazyLoad = () => {
-  if (!productListEl || !productSentinelEl) return;
-  const io = new IntersectionObserver(
-    (entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        loadNextBatch();
-      }
-    },
-    { rootMargin: '200px 0px' }
-  );
-  io.observe(productSentinelEl);
-};
-
-const observeListChanges = () => {
-  if (!productListEl) return;
-  const mo = new MutationObserver(() => {
-    applyLazyBatch();
-  });
-  mo.observe(productListEl, { childList: true });
-};
-
-document.addEventListener('DOMContentLoaded', () => {
-  applyLazyBatch();
-  observeLazyLoad();
-  observeListChanges();
-});

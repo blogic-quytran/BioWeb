@@ -315,7 +315,7 @@ def featured() -> Any:
              products.link AS product_link
         FROM featured
         LEFT JOIN products ON products.id = featured.product_id
-        ORDER BY featured.id ASC
+        ORDER BY products.id DESC NULLS LAST, featured.id DESC
         """
     )
     rows = cur.fetchall()
@@ -448,7 +448,7 @@ def products() -> Any:
     ensure_db_ready()
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM products ORDER BY id ASC")
+    cur.execute("SELECT * FROM products ORDER BY id DESC")
     rows = cur.fetchall()
     conn.close()
     return jsonify(rows_to_dicts(rows))
